@@ -24,7 +24,9 @@
 #include "initial_aligment.hpp"
 #include "motion_estimator.hpp"
 
-extern bool LOOP_CLOSURE;
+#include <stdio.h>
+#include <stdlib.h>
+
 struct RetriveData
 {
     /* data */
@@ -83,7 +85,6 @@ public:
     
     //for loop closure
     RetriveData retrive_pose_data, front_pose;
-    bool loop_enable;
     vector<Vector3f> correct_point_cloud;
     Vector3f correct_Ps[WINDOW_SIZE];
     Matrix3f correct_Rs[WINDOW_SIZE];
@@ -98,9 +99,9 @@ public:
     
     IntegrationBase *pre_integrations[10 * (WINDOW_SIZE + 1)];
     bool first_imu;
-    Vector3d acc_0, gyr_0;
+    Vector3d prev_acc, prev_gyr;
     vector<double> dt_buf[10 * (WINDOW_SIZE + 1)];
-    vector<Vector3d> linear_acceleration_buf[10 * (WINDOW_SIZE + 1)];
+    vector<Vector3d> acceleration_buf[10 * (WINDOW_SIZE + 1)];
     vector<Vector3d> angular_velocity_buf[10 * (WINDOW_SIZE + 1)];
     Matrix<double, 7, 1> IMU_linear[10 * (WINDOW_SIZE + 1)];
     Matrix3d IMU_angular[10 * (WINDOW_SIZE + 1)];

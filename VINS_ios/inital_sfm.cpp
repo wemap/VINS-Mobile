@@ -5,17 +5,45 @@ GlobalSFM::GlobalSFM(){}
 void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
                                  Vector2d &point0, Vector2d &point1, Vector3d &point_3d)
 {
+    printf("Pose0[0]: [%f, %f, %f, %f]\n", Pose0.row(0).x(), Pose0.row(0).y(), Pose0.row(0).z(), Pose0.row(0).w());
+    
+    printf("Pose0[1]: [%f, %f, %f, %f]\n", Pose0.row(1).x(), Pose0.row(1).y(), Pose0.row(1).z(), Pose0.row(1).w());
+    
+    printf("Pose0[2]: [%f, %f, %f, %f]\n", Pose0.row(2).x(), Pose0.row(2).y(), Pose0.row(2).z(), Pose0.row(2).w());
+
+    
+    printf("Pose1[0]: [%f, %f, %f, %f]\n", Pose1.row(0).x(), Pose1.row(0).y(), Pose1.row(0).z(), Pose1.row(0).w());
+    
+    printf("Pose1[1]: [%f, %f, %f, %f]\n", Pose1.row(1).x(), Pose1.row(1).y(), Pose1.row(1).z(), Pose1.row(1).w());
+    
+    printf("Pose1[2]: [%f, %f, %f, %f]\n", Pose1.row(2).x(), Pose1.row(2).y(), Pose1.row(2).z(), Pose1.row(2).w());
+
+
+    printf("point0: [%f, %f]\n", point0.x(), point0.y());
+    printf("point1: [%f, %f]\n", point1.x(), point1.y());
+
     Matrix4d design_matrix = Matrix4d::Zero();
     design_matrix.row(0) = point0[0] * Pose0.row(2) - Pose0.row(0);
     design_matrix.row(1) = point0[1] * Pose0.row(2) - Pose0.row(1);
     design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
     design_matrix.row(3) = point1[1] * Pose1.row(2) - Pose1.row(1);
+    
+    printf("design_matrix[0]: [%f, %f, %f, %f]\n", design_matrix.row(0).x(), design_matrix.row(0).y(), design_matrix.row(0).z(), design_matrix.row(0).w());
+    
+    printf("design_matrix[1]: [%f, %f, %f, %f]\n", design_matrix.row(1).x(), design_matrix.row(1).y(), design_matrix.row(1).z(), design_matrix.row(1).w());
+    
+    printf("design_matrix[2]: [%f, %f, %f, %f]\n", design_matrix.row(2).x(), design_matrix.row(2).y(), design_matrix.row(2).z(), design_matrix.row(2).w());
+    
+    printf("design_matrix[3]: [%f, %f, %f, %f]\n", design_matrix.row(3).x(), design_matrix.row(3).y(), design_matrix.row(3).z(), design_matrix.row(3).w());
+    
     Vector4d triangulated_point;
     triangulated_point =
     design_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().rightCols<1>();
     point_3d(0) = triangulated_point(0) / triangulated_point(3);
     point_3d(1) = triangulated_point(1) / triangulated_point(3);
     point_3d(2) = triangulated_point(2) / triangulated_point(3);
+
+    printf("point3d: [%f, %f, %f]\n", point_3d.x(), point_3d.y(), point_3d.z());
 }
 
 

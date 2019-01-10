@@ -10,7 +10,7 @@
 
 int FeatureTracker::n_id = 0;
 FeatureTracker::FeatureTracker()
-:mask{ROW, COL, CV_8UC1},update_finished{false},img_cnt{0},current_time{-1.0},use_pnp{false}
+:update_finished{false},img_cnt{0},current_time{-1.0},use_pnp{false}
 {
     printf("init ok\n");
 }
@@ -33,74 +33,6 @@ void reduceVector(vector<T> &v, vector<uchar> status)
     v.resize(j);
 }
 
-void FeatureTracker::addPoints()
-{
-    for (auto &p : n_pts)
-    {
-        forw_pts.push_back(p);
-        ids.push_back(-1);
-        track_cnt.push_back(1);
-        max_min_pts tmp;
-        tmp.min = p;
-        tmp.max = p;
-        parallax_cnt.push_back(tmp);
-    }
-}
-
-void FeatureTracker::setMask()
-{
-    mask.setTo(255);
-    
-    // prefer to keep features that are tracked for long time
-    
-    vector<pair<pair<int, max_min_pts>, pair<cv::Point2f, int>>> cnt_pts_id;
-    
-    for (unsigned int i = 0; i < forw_pts.size(); i++)
-        cnt_pts_id.push_back(make_pair(make_pair(track_cnt[i], parallax_cnt[i]), make_pair(forw_pts[i], ids[i])));
-    
-    sort(cnt_pts_id.begin(), cnt_pts_id.end(), [](const pair<pair<int, max_min_pts>, pair<cv::Point2f, int>> &a, const pair<pair<int, max_min_pts>, pair<cv::Point2f, int>> &b)
-         {
-             return a.first.first > b.first.first;
-         });
-    
-    forw_pts.clear();
-    ids.clear();
-    track_cnt.clear();
-    parallax_cnt.clear();
-    
-    for (auto &it : cnt_pts_id)
-    {
-        if (mask.at<uchar>(it.second.first) == 255)
-            //if(true)
-        {
-            forw_pts.push_back(it.second.first);
-            ids.push_back(it.second.second);
-            track_cnt.push_back(it.first.first);
-            parallax_cnt.push_back(it.first.second);
-            cv::circle(mask, it.second.first, MIN_DIST, 0, -1);
-        }
-    }
-    //for (auto &it: pre_pts)
-    //{
-    //    cv::circle(mask, it, MIN_DIST, 0, -1);
-    //}
-}
-
-void FeatureTracker::rejectWithF()
-{
-    if (forw_pts.size() >= 8)
-    {
-        vector<uchar> status;
-        
-        cv::findFundamentalMat(pre_pts, forw_pts, cv::FM_RANSAC, F_THRESHOLD, 0.99, status);
-        reduceVector(pre_pts, status);
-        reduceVector(cur_pts, status);
-        reduceVector(forw_pts, status);
-        reduceVector(ids, status);
-        reduceVector(track_cnt, status);
-        reduceVector(parallax_cnt, status);
-    }
-}
 
 /*********************************************************tools function for feature tracker ending*****************************************************/
 
@@ -162,50 +94,97 @@ bool FeatureTracker::solveVinsPnP(double header, Vector3d &P, Matrix3d &R, bool 
 void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_cnt, vector<Point2f> &good_pts, vector<double> &track_len, double header, Vector3d &P, Matrix3d &R, bool vins_normal)
 {
     
+    // ********
+    // Thibaud: This method is called BEFORE and AFTER INITIALIZATION
+    //
+    //          track_len is empty here, it will become a vector of the size of good_pts (often 70), each value is between 0 and 1,
+    //              1 is a good parallax.
+    //
+    //          good_pts and track_len are here just for drawing, good_pts is empty here
+    // ********
+    
+    printf("TIME: FeatureTracker::readImage: %.3ld\n", std::time(nullptr));
+
+
+    // ********
+    // Thibaud: *_img are empty first time
+    // ********
     result = _img;
     if(forw_img.empty())
         pre_img = cur_img = forw_img = _img;
     else
         forw_img = _img;
+
     
     forw_pts.clear();
     
     //track
     {
+        // ********
+        // Thibaud: Here, cur_pts are forw_pts from previous frame.
+        //          So, following code is not called if no points are tracked at previous frame. (a black frame for eg.)
+        // ********
         if(cur_pts.size()>0)
         {
             vector<uchar> status;
             vector<float> err;
             
             //TS(time_track);
+            
+
+            // ********
+            // Thibaud: cur_pts has a size of N and N is often 70
+            //          forw_pts input is empty
+            //          forw_pts output is size of N
+            //          status is size of N
+            // ********
+            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (before): %ld\n", cur_pts.size());
             calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
+
+
+
+            // ********
+            // Thibaud: Remove pts which are on image border
+            // ********
             //TE(time_track);
             for (int i = 0; i < int(forw_pts.size()); i++)
                 if (status[i] && !inBorder(forw_pts[i]))
                     status[i] = 0;
+            
+            // ********
+            // Thibaud: Remove indexes from status in following vectors
+            // ********
             reduceVector(pre_pts, status);
             reduceVector(cur_pts, status);
             reduceVector(forw_pts, status);
             reduceVector(ids, status);
-            reduceVector(track_cnt, status);
             reduceVector(parallax_cnt, status);
-            
-            //reject outliers
+            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (after): %ld\n", cur_pts.size());
+
+            // ********
+            // Thibaud: Call ransac with cur_pts and forw_pts and reduce following vectors:
+            //          pre_pts, cur_pts, forw_pts, ids, parallax_cnt
+            //          Call it only if there is more than 8 forw_pts
+            // ********
             if (forw_pts.size() >= 8)
             {
                 vector<uchar> status;
                 
                 cv::findFundamentalMat(cur_pts, forw_pts, cv::FM_RANSAC, F_THRESHOLD, 0.99, status);
+//                printf("TIME: FeatureTracker::readImage - findFundamentalMat: %ld\n", cur_pts.size());
                 reduceVector(cur_pts, status);
                 reduceVector(pre_pts, status);
                 reduceVector(forw_pts, status);
                 reduceVector(ids, status);
-                reduceVector(track_cnt, status);
                 reduceVector(parallax_cnt, status);
             }
             
             solveVinsPnP(header, P, R, vins_normal);
             
+            // ********
+            // Thibaud: This section is called 2 frames out of 3 (when detection is not called
+            //           I think this is just for drawing
+            // ********
             if(img_cnt!=0)
             {
                 for (int i = 0; i< forw_pts.size(); i++)
@@ -227,16 +206,64 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
         }
     }
     
-    //detect
+    // ********
+    // Thibaud: Every 3 frames (when img_cnt == 0), good_pts is empty here
+    // ********
+
+    // detect
+    // ********
+    // Thibaud: This part is called every 3 frames (when img_cnt == 0)
+    //          good_pts is empty here
+    //
+    //          Firstly, ransac is called if forw_pts >= 8
+    //              -> pre_pts, cur_pts, forw_pts, ids, parallax_cnt are modified with ransac result
+    //              -> remaining fwd_pts are added to good_pts vector
+    //          Then, parallax_cnt is modified regarding to good_pts found with ransac. (min/max for each point)
+    //
+    // ********
     {
-        
+        // ********
+        // Thibaud: img_cnt is an iterative counter with a modulus 3
+        // ********
         if(img_cnt==0)
         {
-            rejectWithF();
+            // ********
+            // Thibaud: Following is called every 3 frames
+            // ********
             
+            
+            
+            
+            // ********
+            // Thibaud: Call ransac with pre_pts and forw_pts and reduce following vectors:
+            //          pre_pts, cur_pts, forw_pts, ids, parallax_cnt
+            //          Call it only if there is more than 8 forw_pts
+            // ********
+            if (forw_pts.size() >= 8)
+            {
+                vector<uchar> status;
+                cv::findFundamentalMat(pre_pts, forw_pts, cv::FM_RANSAC, F_THRESHOLD, 0.99, status);
+                reduceVector(pre_pts, status);
+                reduceVector(cur_pts, status);
+                reduceVector(forw_pts, status);
+                reduceVector(ids, status);
+                reduceVector(parallax_cnt, status);
+            }
+            
+            
+            // ********
+            // Thibaud: good_pts are forw_pts after ransac
+            // ********
             for (int i = 0; i< forw_pts.size(); i++)
             {
                 good_pts.push_back(forw_pts[i]);
+            }
+            
+            // ********
+            // Thibaud: Check parallax with forw_pts
+            // ********
+            for (int i = 0; i< forw_pts.size(); i++)
+            {
                 if(forw_pts[i].x < parallax_cnt[i].min.x || forw_pts[i].y < parallax_cnt[i].min.y)
                 {
                     parallax_cnt[i].min = forw_pts[i];
@@ -246,13 +273,19 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                     parallax_cnt[i].max = forw_pts[i];
                 }
                 double parallax = (cv::norm(parallax_cnt[i].max - parallax_cnt[i].min) < 2.0? 0: cv::norm(parallax_cnt[i].max - parallax_cnt[i].min));
+                
+                // ********
+                // Thibaud: Value between 0 (no translation) and 1 (good translation)
+                // ********
                 track_len.push_back(std::min(1.0, 1.0 * parallax/50));
             }
             
-            for (auto &n : track_cnt)
-                n++;
             
-            setMask();
+
+            
+            // ********
+            // Thibaud: MAX_CNT is 70, n_max_cnt is often less than 70
+            // ********
             int n_max_cnt = MAX_CNT - static_cast<int>(forw_pts.size());
             
             if(n_max_cnt>0)
@@ -260,30 +293,67 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                 n_pts.clear();
                 TS(time_goodfeature);
                 //goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.10, MIN_DIST, mask, 3, false, 0.04);
-                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST, mask);
+                // ********
+                // Thibaud: Retrieve n_max_cnt features from forw_img. Result is in n_pts
+                // ********
+                goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST);
+                printf("TIME: FeatureTracker::readImage - goodFeaturesToTrack\n");
                 TE(time_goodfeature);
             }
             else
             {
+                // ********
+                // Thibaud: It seems to work without this line
+                // ********
                 n_pts.clear();
             }
+
+            // ********
+            // Thibaud: Add new points to forw_pts and parallax_cnt. Create a -1 id
+            // ********
+            for (auto &p : n_pts) {
+                forw_pts.push_back(p);
+                ids.push_back(-1);
+                
+                // ********
+                // Thibaud: Init max-min parallax with first value (p)
+                // ********
+                max_min_pts tmp;
+                tmp.min = p;
+                tmp.max = p;
+                parallax_cnt.push_back(tmp);
+            }
             
-            addPoints();
-            //printf("features num after detect: %d\n",static_cast<int>(forw_pts.size()));
+            
+            // ********
+            // Thibaud: forw img and pts became pre img and pts
+            // ********
             pre_img = forw_img;
             pre_pts = forw_pts;
+
+            // ********
+            // Thibaud: Add new points to good_pts (good_pts are points after ransac, so I don't know why here)
+            // ********
             //draw
             for (int i = 0; i < n_pts.size(); i++)
             {
                 good_pts.push_back(n_pts[i]);
                 track_len.push_back(0);
             }
-            //result = mask;
+            
+            
+//            printf("TIME: FeatureTracker::readImage - good_pts: %d\n", good_pts == forw_pts);
+//            if(good_pts == forw_pts) {
+//            }
+            
+//            good_pts = forw_pts;
             
         }
         cur_img = forw_img;
         cur_pts = forw_pts;
     }
+    
+    
     if(img_cnt == 0)
     {
         //update id and msg

@@ -8,7 +8,7 @@
 
 #include "VINS.hpp"
 
-bool LOOP_CLOSURE = true;
+bool LOOP_CLOSURE = false;
 
 VINS::VINS()
 :f_manager{Rs},fail_times{0},
@@ -45,7 +45,7 @@ void VINS::clearState()
         IMU_angular[i].setIdentity();
         pre_integrations[i] = nullptr;
         dt_buf[i].clear();
-        linear_acceleration_buf[i].clear();
+        acceleration_buf[i].clear();
         angular_velocity_buf[i].clear();
         
         if (pre_integrations[i] != nullptr)
@@ -171,26 +171,6 @@ void VINS::new2old()
     }
     Vector3d cur_P0 = Ps[0];
     
-    if(LOOP_CLOSURE && loop_enable)
-    {
-        loop_enable = false;
-        for(int i = 0; i< WINDOW_SIZE; i++)
-        {
-            if(front_pose.header == Headers[i])
-            {
-                Matrix3d Rs_loop = Quaterniond(front_pose.loop_pose[6],  front_pose.loop_pose[3],  front_pose.loop_pose[4],  front_pose.loop_pose[5]).normalized().toRotationMatrix();
-                Vector3d Ps_loop = Vector3d( front_pose.loop_pose[0],  front_pose.loop_pose[1],  front_pose.loop_pose[2]);
-                
-                Rs_loop = rot_diff * Rs_loop;
-                Ps_loop = rot_diff * (Ps_loop - Vector3d(para_Pose[0][0], para_Pose[0][1], para_Pose[0][2])) + origin_P0;
-                
-                double drift_yaw = Utility::R2ypr(front_pose.Q_old.toRotationMatrix()).x() - Utility::R2ypr(Rs_loop).x();
-                r_drift = Utility::ypr2R(Vector3d(drift_yaw, 0, 0));
-                //r_drift = front_pose.Q_old.toRotationMatrix() * Rs_loop.transpose();
-                t_drift = front_pose.P_old - r_drift * Ps_loop;
-            }
-        }
-    }
     
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
@@ -330,52 +310,58 @@ void VINS::update_loop_correction()
     }
 }
 
-void VINS::processIMU(double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity)
+void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &angular_velocity)
 {
+    printf("TIME: VINS::processIMU: %.3ld\n", std::time(nullptr));
     if (!first_imu)
     {
         first_imu = true;
-        acc_0 = linear_acceleration;
-        gyr_0 = angular_velocity;
+        prev_acc = acceleration; // Acceleration
+        prev_gyr = angular_velocity; // Gyro
     }
     
     if (!pre_integrations[frame_count])
     {
-        pre_integrations[frame_count] = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
+        pre_integrations[frame_count] = new IntegrationBase{prev_acc, prev_gyr, Bas[frame_count], Bgs[frame_count]};
     }
     
     if (frame_count != 0)
     {
         //covariance propagate
-        pre_integrations[frame_count]->push_back(dt, linear_acceleration, angular_velocity);
+        pre_integrations[frame_count]->push_back(dt, acceleration, angular_velocity);
         
         if(solver_flag != NON_LINEAR) //comments because of recovering
-            tmp_pre_integration->push_back(dt, linear_acceleration, angular_velocity);
+            tmp_pre_integration->push_back(dt, acceleration, angular_velocity);
         
         dt_buf[frame_count].push_back(dt);
-        linear_acceleration_buf[frame_count].push_back(linear_acceleration);
+        acceleration_buf[frame_count].push_back(acceleration);
         angular_velocity_buf[frame_count].push_back(angular_velocity);
         
         //midpoint integration
         {
             Vector3d g{0,0,GRAVITY};
             int j = frame_count;
-            Vector3d un_acc_0 = Rs[j] * (acc_0 - Bas[j]) - g;
-            Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs[j];
-            Rs[j] *= Utility::deltaQ(un_gyr * dt).toRotationMatrix();
-            Vector3d un_acc_1 = Rs[j] * (linear_acceleration - Bas[j]) - g;
-            Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
-            Ps[j] += dt * Vs[j] + 0.5 * dt * dt * un_acc;
+
+            Vector3d un_prev_acc = Rs[j] * (prev_acc - Bas[j]) - g; // Linear acceleration (3)
+            Vector3d un_cur_acc = Rs[j] * (acceleration - Bas[j]) - g;
+            Vector3d un_acc = 0.5 * (un_prev_acc + un_cur_acc); // (Mean of last linear acc and new one ?)
             Vs[j] += dt * un_acc;
+            Ps[j] += dt * Vs[j] + 0.5 * dt * Vs[j];
+
+            Vector3d un_gyr = 0.5 * (prev_gyr + angular_velocity) - Bgs[j]; // (3)
+            Rs[j] *= Utility::deltaQ(un_gyr * dt).toRotationMatrix(); // (3) Gyro Int
         }
         
     }
-    acc_0 = linear_acceleration;
-    gyr_0 = angular_velocity;
+    
+    // Save last values
+    prev_acc = acceleration;
+    prev_gyr = angular_velocity;
 }
 
 void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_num)
 {
+    printf("TIME: VINS::processImage: %.3ld\n", std::time(nullptr));
     int track_num;
     printf("adding feature points %lu\n", image_msg.size());
     if (f_manager.addFeatureCheckParallax(frame_count, image_msg, track_num))
@@ -395,8 +381,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
         ImageFrame imageframe(image_msg, header);
         imageframe.pre_integration = tmp_pre_integration;
         all_image_frame.insert(make_pair(header, imageframe));
-        tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Vector3d(0,0,0), Vector3d(0,0,0)};
+        tmp_pre_integration = new IntegrationBase{prev_acc, prev_gyr, Vector3d(0,0,0), Vector3d(0,0,0)};
         
+        printf("TIME: VINS::processImage frame_count: %d, track_num: %d\n", frame_count, track_num);
         if (frame_count == WINDOW_SIZE)
         {
             if(track_num < 20)
@@ -415,7 +402,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
                 solve_ceres(buf_num);
                 if(final_cost > 200)  //initialization failed, need reinitialize
                 {
-                    printf("final cost %lf faild!\n",final_cost);
+                    printf("#################### TIME: VINS: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
+                    printf("#################### TIME: VC: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
+                    printf("#################### TIME: FeatureTracker: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
                     delete last_marginalization_info;
                     last_marginalization_info = nullptr;
                     solver_flag = INITIAL;
@@ -432,6 +421,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
                     init_status = SUCC;
                     fail_times = 0;
                     printf("Initialization finish---------------------------------------------------!\n");
+                    printf("#################### TIME: VINS: INITIALIZATION FINISHED! ####################\n");
+                    printf("#################### TIME: VC: INITIALIZATION FINISHED! ####################\n");
+                    printf("#################### TIME: FeatureTracker: INITIALIZATION FINISHED! ####################\n");
                     solver_flag = NON_LINEAR;
                     slideWindow();
                     f_manager.removeFailures();
@@ -455,6 +447,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
     }
     else
     {
+
+        printf("TIME: VINS::processImage Gogogo\n");
+
         bool is_nonlinear = true;
         f_manager.triangulate(Ps, tic, ric, is_nonlinear);
         solve_ceres(buf_num);
@@ -568,73 +563,9 @@ void VINS::solve_ceres(int buf_num)
     visual_cost = r_f_sum;
     visual_factor_num = f_m_cnt;
     
-    if(LOOP_CLOSURE)
-    {
-        //loop close factor
-        //front_pose.measurements.clear();
-        if(front_pose.header != retrive_pose_data.header)
-        {
-            front_pose = retrive_pose_data;  //need lock
-            printf("use loop\n");
-        }
-        if(!front_pose.measurements.empty())
-        {
-            //the retrive pose is in the current window
-            if(front_pose.header >= Headers[0])
-            {
-                //tmp_retrive_pose_buf.push(front_pose);
-                printf("loop front pose  in window\n");
-                for(int i = 0; i < WINDOW_SIZE; i++)
-                {
-                    if(front_pose.header == Headers[i])
-                    {
-                        for (int k = 0; k < 7; k++)
-                            front_pose.loop_pose[k] = para_Pose[i][k];
-                        ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
-                        problem.AddParameterBlock(front_pose.loop_pose, SIZE_POSE, local_parameterization);
-                        
-                        int retrive_feature_index = 0;
-                        int feature_index = -1;
-                        int loop_factor_cnt = 0;
-                        for (auto &it_per_id : f_manager.feature)
-                        {
-                            it_per_id.used_num = it_per_id.feature_per_frame.size();
-                            if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
-                                continue;
-                            ++feature_index;
-                            int start = it_per_id.start_frame;
-                            //feature has been obeserved in ith frame
-                            int end = (int)(start + it_per_id.feature_per_frame.size() - i - 1);
-                            if(start <= i && end >=0)
-                            {
-                                while(front_pose.features_ids[retrive_feature_index] < it_per_id.feature_id)
-                                {
-                                    retrive_feature_index++;
-                                }
-                                
-                                if(front_pose.features_ids[retrive_feature_index] == it_per_id.feature_id)
-                                {
-                                    Vector3d pts_j = Vector3d(front_pose.measurements[retrive_feature_index].x, front_pose.measurements[retrive_feature_index].y, 1.0);
-                                    Vector3d pts_i = it_per_id.feature_per_frame[0].point;
-                                    //double ratio = 1.0;
-                                    ProjectionFactor *f = new ProjectionFactor(pts_i, pts_j);
-                                    problem.AddResidualBlock(f, loss_function, para_Pose[start], front_pose.loop_pose, para_Ex_Pose[0], para_Feature[feature_index]);
-                                    
-                                    //printf("loop add factor %d %d %lf %lf %d\n",retrive_feature_index,feature_index,
-                                    //                                         pts_j.x(), pts_i.x(),front_pose.features_ids.size());
-                                    retrive_feature_index++;
-                                    loop_factor_cnt++;
-                                    loop_enable = true;
-                                }
-                                
-                            }
-                        }
-                        printf("add %d loop factor\n", loop_factor_cnt);
-                    }
-                }
-            }
-        }
-    }
+    
+    
+    
     
     ceres::Solver::Options options;
     
@@ -656,28 +587,15 @@ void VINS::solve_ceres(int buf_num)
     //TE(prepare_solver);
     TS(ceres);
     printf("solve\n");
+    printf("options: %lf\n", options.eta);
+    printf("problem: %d\n", problem.NumParameters());
+    printf("options: %lf\n", summary.final_cost);
     ceres::Solve(options, &problem, &summary);
     final_cost = summary.final_cost;
     //cout << summary.FullReport() << endl;
     TE(ceres);
     
-    if(LOOP_CLOSURE)
-    {
-        for(int i = 0; i< WINDOW_SIZE; i++)
-        {
-            if(front_pose.header == Headers[i])
-            {
-                Matrix3d Rs_i = Quaterniond(para_Pose[i][6], para_Pose[i][3], para_Pose[i][4], para_Pose[i][5]).normalized().toRotationMatrix();
-                Vector3d Ps_i = Vector3d(para_Pose[i][0], para_Pose[i][1], para_Pose[i][2]);
-                Matrix3d Rs_loop = Quaterniond(front_pose.loop_pose[6],  front_pose.loop_pose[3],  front_pose.loop_pose[4],  front_pose.loop_pose[5]).normalized().toRotationMatrix();
-                Vector3d Ps_loop = Vector3d( front_pose.loop_pose[0],  front_pose.loop_pose[1],  front_pose.loop_pose[2]);
-                
-                front_pose.relative_t = Rs_loop.transpose() * (Ps_i - Ps_loop);
-                front_pose.relative_q = Rs_loop.transpose() * Rs_i;
-                front_pose.relative_yaw = Utility::normalizeAngle(Utility::R2ypr(Rs_i).x() - Utility::R2ypr(Rs_loop).x());
-            }
-        }
-    }
+    
     
     new2old();
     
@@ -832,6 +750,7 @@ void VINS::solve_ceres(int buf_num)
 
 bool VINS::solveInitial()
 {
+    printf("TIME: VINS::solveInitial: %.3ld\n", std::time(nullptr));
     printf("solve initial------------------------------------------\n");
     printf("PS %lf %lf %lf\n", Ps[0].x(),Ps[0].y(), Ps[0].z());
     //check imu observibility
@@ -1103,6 +1022,7 @@ bool VINS::visualInitialAlign()
 
 bool VINS::relativePose(int camera_id, Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
+    printf("TIME: VINS::relativePose: %.3ld\n", std::time(nullptr));
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
@@ -1160,7 +1080,7 @@ void VINS::slideWindow()
                 Rs[i].swap(Rs[i + 1]);
                 std::swap(pre_integrations[i], pre_integrations[i + 1]);
                 dt_buf[i].swap(dt_buf[i + 1]);
-                linear_acceleration_buf[i].swap(linear_acceleration_buf[i + 1]);
+                acceleration_buf[i].swap(acceleration_buf[i + 1]);
                 angular_velocity_buf[i].swap(angular_velocity_buf[i + 1]);
                 Headers[i] = Headers[i + 1];
                 Ps[i].swap(Ps[i + 1]);
@@ -1177,10 +1097,10 @@ void VINS::slideWindow()
             {
                 delete pre_integrations[WINDOW_SIZE];
             }
-            pre_integrations[WINDOW_SIZE] = new IntegrationBase{acc_0, gyr_0, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
+            pre_integrations[WINDOW_SIZE] = new IntegrationBase{prev_acc, prev_gyr, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
             
             dt_buf[WINDOW_SIZE].clear();
-            linear_acceleration_buf[WINDOW_SIZE].clear();
+            acceleration_buf[WINDOW_SIZE].clear();
             angular_velocity_buf[WINDOW_SIZE].clear();
             
             if (solver_flag == INITIAL)
@@ -1201,13 +1121,13 @@ void VINS::slideWindow()
             for (unsigned int i = 0; i < dt_buf[frame_count].size(); i++)
             {
                 double tmp_dt = dt_buf[frame_count][i];
-                Vector3d tmp_linear_acceleration = linear_acceleration_buf[frame_count][i];
+                Vector3d tmp_linear_acceleration = acceleration_buf[frame_count][i];
                 Vector3d tmp_angular_velocity = angular_velocity_buf[frame_count][i];
                 
                 pre_integrations[frame_count - 1]->push_back(tmp_dt, tmp_linear_acceleration, tmp_angular_velocity);
                 
                 dt_buf[frame_count - 1].push_back(tmp_dt);
-                linear_acceleration_buf[frame_count - 1].push_back(tmp_linear_acceleration);
+                acceleration_buf[frame_count - 1].push_back(tmp_linear_acceleration);
                 angular_velocity_buf[frame_count - 1].push_back(tmp_angular_velocity);
             }
             
@@ -1221,10 +1141,10 @@ void VINS::slideWindow()
             {
                 delete pre_integrations[WINDOW_SIZE];
             }
-            pre_integrations[WINDOW_SIZE] = new IntegrationBase{acc_0, gyr_0, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
+            pre_integrations[WINDOW_SIZE] = new IntegrationBase{prev_acc, prev_gyr, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
             
             dt_buf[WINDOW_SIZE].clear();
-            linear_acceleration_buf[WINDOW_SIZE].clear();
+            acceleration_buf[WINDOW_SIZE].clear();
             angular_velocity_buf[WINDOW_SIZE].clear();
             
             slideWindowNew();

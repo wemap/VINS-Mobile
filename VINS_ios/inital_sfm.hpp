@@ -71,4 +71,11 @@ private:
                               vector<SFMFeature> &sfm_f);
     
     int feature_num;
+    
+    static std::string toString(const Eigen::Matrix<double, 3, 4>& mat){
+        std::stringstream ss;
+        ss << mat;
+        return ss.str();
+    }
+
 };

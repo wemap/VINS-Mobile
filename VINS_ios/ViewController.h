@@ -16,9 +16,6 @@
 #include <queue>
 #import "draw_result.hpp"
 #import <CoreMotion/CoreMotion.h>
-#include "keyframe.h"
-#include "loop_closure.h"
-#include "keyfame_database.h"
 #import <sys/utsname.h>
 
 @interface ViewController : UIViewController<CvVideoCameraDelegate,UITextViewDelegate>
@@ -31,9 +28,6 @@
     NSCondition *_condition;
     NSThread *mainLoop;
     NSThread *draw;
-    NSThread *saveData;
-    NSThread *loop_thread;
-    NSThread *globalLoopThread;
     UITextView *textY;
 }
 
@@ -41,7 +35,6 @@
 @property (nonatomic, strong) IBOutlet UIImageView* imageView;
 @property (nonatomic, strong) IBOutlet UIImageView* featureImageView;
 
-@property (weak, nonatomic) IBOutlet UIButton *loopButton;
 @property (weak, nonatomic) IBOutlet UIButton *reinitButton;
 
 - (IBAction)recordButtonPressed:(id)sender;
