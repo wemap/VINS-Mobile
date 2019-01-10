@@ -95,7 +95,6 @@ public:
     int last_track_num;
     
 private:
-    double compensatedParallax1(FeaturePerId &it_per_id);
     double compensatedParallax2(const FeaturePerId &it_per_id, int frame_count);
     const Matrix3d *Rs;
     Matrix3d ric;

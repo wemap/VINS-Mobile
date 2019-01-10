@@ -55,9 +55,8 @@ class FeatureTracker
 {
 public:
     FeatureTracker();
-    bool solveVinsPnP(double header, Vector3d &P, Matrix3d &R, bool vins_normal);
-    void readImage(const cv::Mat &_img, cv::Mat &result, int _frame_cnt, vector<Point2f> &good_pts, vector<double> &track_len, double header, Vector3d &P, Matrix3d &R, bool vins_normal);
-    bool updateID(unsigned int i);
+    bool solveVinsPnP(double header, Vector3d &P, Matrix3d &R);
+    void readImage(const cv::Mat &_img, int _frame_cnt, vector<Point2f> &good_pts, vector<double> &track_len, double header, Vector3d &P, Matrix3d &R, bool vins_normal);
     
     /*
      varialbles

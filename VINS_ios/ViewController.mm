@@ -326,7 +326,6 @@ Matrix3d pnp_R;
 
         cv::Mat gray;
         cv::cvtColor(input_frame, gray, CV_RGBA2GRAY);
-        cv::Mat img_with_feature;
         cv::Mat img_equa;
         
         // ********
@@ -355,14 +354,16 @@ Matrix3d pnp_R;
         
         // ********
         // Thibaud: around 70 good_pts every iteration
+        //          USE_PNP is always false in our case
         // ********
         vector<Point2f> good_pts;
         vector<double> track_len;
         bool vins_normal = (vins.solver_flag == VINS::NON_LINEAR);
         featuretracker.use_pnp = USE_PNP;
-        featuretracker.readImage(img_equa, img_with_feature,frame_cnt, good_pts, track_len, img_msg->header, pnp_P, pnp_R, vins_normal);
+        featuretracker.readImage(img_equa, frame_cnt, good_pts, track_len, img_msg->header, pnp_P, pnp_R, vins_normal);
         TE(time_feature);
         //cvtColor(img_equa, img_equa, CV_GRAY2BGR);
+        
         
         for (int i = 0; i < good_pts.size(); i++)
         {

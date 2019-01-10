@@ -36,17 +36,17 @@ void reduceVector(vector<T> &v, vector<uchar> status)
 
 /*********************************************************tools function for feature tracker ending*****************************************************/
 
-bool FeatureTracker::solveVinsPnP(double header, Vector3d &P, Matrix3d &R, bool vins_normal)
+bool FeatureTracker::solveVinsPnP(double header, Vector3d &P, Matrix3d &R)
 {
-    if(!vins_normal)
-        return false;
-    /*
-     if(solved_features.size() < 2)
-     {
-     printf("pnp not enough features\n");
-     return false;
-     }
-     */
+    // ********
+    // Thibaud: header is a timestamp
+    //          P & R are output
+    // ********
+
+
+    // ********
+    // Thibaud: TODO what is this loop designed for ?
+    // ********
     vector<IMG_MSG_LOCAL> feature_msg;
     int i = 0;
     for (auto &it : solved_features)
@@ -59,19 +59,19 @@ bool FeatureTracker::solveVinsPnP(double header, Vector3d &P, Matrix3d &R, bool 
         {
             IMG_MSG_LOCAL tmp;
             tmp = it;
+            // ********
+            // Thibaud: I think this is for calculating 3D points (z is unknown due to the scale)
+            // ********
             tmp.observation = (Vector2d((forw_pts[i].x - PX)/FOCUS_LENGTH_X, (forw_pts[i].y - PY)/FOCUS_LENGTH_Y));
             feature_msg.push_back(tmp);
         }
     }
-    /*
-     if(feature_msg.size() < 2 )
-     {
-     printf("pnp Not enough solved feature!\n");
-     return false;
-     }
-     */
+
     vins_pnp.setInit(solved_vins);
-    printf("pnp imu header: ");
+    
+    // ********
+    // Thibaud: Send last imu (3 or 4 messages) and image to vins_pnp
+    // ********
     for(auto &it : imu_msgs)
     {
         double t = it.header;
@@ -79,37 +79,44 @@ bool FeatureTracker::solveVinsPnP(double header, Vector3d &P, Matrix3d &R, bool 
             current_time = t;
         double dt = (t - current_time);
         current_time = t;
-        printf("%lf ",t);
         vins_pnp.processIMU(dt, it.acc, it.gyr);
     }
-    printf("image %lf\n", header);
+    
+
     vins_pnp.processImage(feature_msg, header, use_pnp);
     
     P = vins_pnp.Ps[PNP_SIZE - 1];
     R = vins_pnp.Rs[PNP_SIZE - 1];
-    Vector3d R_ypr = Utility::R2ypr(R);
+
     return true;
 }
 
-void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_cnt, vector<Point2f> &good_pts, vector<double> &track_len, double header, Vector3d &P, Matrix3d &R, bool vins_normal)
+void FeatureTracker::readImage(const cv::Mat &_img, int _frame_cnt, vector<Point2f> &good_pts, vector<double> &track_len, double header, Vector3d &P, Matrix3d &R, bool vins_normal)
 {
     
     // ********
     // Thibaud: This method is called BEFORE and AFTER INITIALIZATION
     //
+    //          Every frame, this method calls calcOpticalFlowPyrLK and findFundamentalMat (ransac)
+    //          Every frame, when initialized, solveVinsPnP is called, P and R are filled.
+    //
+    //          1 frame out of 3, this method calls findFundamentalMat (ransac), then for disappearing pts calls goodFeaturesToTrack
+    //          1 frame out of 3, new points from goodFeaturesToTrack have a new id
+    //          1 frame out of 3, image_msg is filled with 3d positions of all fwd_pts (z = 1)
+    //
+    //          good_pts and track_len are here just for drawing, good_pts is empty here
     //          track_len is empty here, it will become a vector of the size of good_pts (often 70), each value is between 0 and 1,
     //              1 is a good parallax.
     //
-    //          good_pts and track_len are here just for drawing, good_pts is empty here
     // ********
     
-    printf("TIME: FeatureTracker::readImage: %.3ld\n", std::time(nullptr));
+//    printf("TIME: FeatureTracker::readImage: %.3ld\n", std::time(nullptr));
 
 
     // ********
     // Thibaud: *_img are empty first time
     // ********
-    result = _img;
+
     if(forw_img.empty())
         pre_img = cur_img = forw_img = _img;
     else
@@ -138,7 +145,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
             //          forw_pts output is size of N
             //          status is size of N
             // ********
-            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (before): %ld\n", cur_pts.size());
+//            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (before): %ld\n", cur_pts.size());
             calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
 
 
@@ -159,7 +166,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
             reduceVector(forw_pts, status);
             reduceVector(ids, status);
             reduceVector(parallax_cnt, status);
-            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (after): %ld\n", cur_pts.size());
+//            printf("TIME: FeatureTracker::readImage - calcOpticalFlowPyrLK (after): %ld\n", cur_pts.size());
 
             // ********
             // Thibaud: Call ransac with cur_pts and forw_pts and reduce following vectors:
@@ -179,10 +186,13 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                 reduceVector(parallax_cnt, status);
             }
             
-            solveVinsPnP(header, P, R, vins_normal);
+            
+            if(vins_normal) {
+                solveVinsPnP(header, P, R);
+            }
             
             // ********
-            // Thibaud: This section is called 2 frames out of 3 (when detection is not called
+            // Thibaud: This section is called 2 frames out of 3 (when detection is not called)
             //           I think this is just for drawing
             // ********
             if(img_cnt!=0)
@@ -261,6 +271,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
             
             // ********
             // Thibaud: Check parallax with forw_pts
+            //          This part is called after ransac and before goodFeaturesToTrack
             // ********
             for (int i = 0; i< forw_pts.size(); i++)
             {
@@ -297,7 +308,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                 // Thibaud: Retrieve n_max_cnt features from forw_img. Result is in n_pts
                 // ********
                 goodFeaturesToTrack(forw_img, n_pts, n_max_cnt, 0.01, MIN_DIST);
-                printf("TIME: FeatureTracker::readImage - goodFeaturesToTrack\n");
+//                printf("TIME: FeatureTracker::readImage - goodFeaturesToTrack\n");
                 TE(time_goodfeature);
             }
             else
@@ -341,13 +352,6 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
                 track_len.push_back(0);
             }
             
-            
-//            printf("TIME: FeatureTracker::readImage - good_pts: %d\n", good_pts == forw_pts);
-//            if(good_pts == forw_pts) {
-//            }
-            
-//            good_pts = forw_pts;
-            
         }
         cur_img = forw_img;
         cur_pts = forw_pts;
@@ -358,15 +362,25 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
     {
         //update id and msg
         image_msg.clear();
-        int num_new = 0;
         
+        // ********
+        // Thibaud: Add a new id number to new pts
+        // ********
         for (unsigned int i = 0;; i++)
         {
-            bool completed = false;
-            completed |= updateID(i);
-            if (!completed)
+            if (i < ids.size()) {
+                if(ids[i] == -1) {
+                    ids[i] = n_id++;
+                }
+            }
+            else {
                 break;
+            }
         }
+        
+        // ********
+        // Thibaud: Calculate 3D point of tracked points (z is unknown due to the scale)
+        // ********
         for(int i = 0; i<ids.size(); i++)
         {
             double x = (cur_pts[i].x - PX)/FOCUS_LENGTH_X;
@@ -375,17 +389,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, cv::Mat &result, int _frame_
             image_msg[(ids[i])] = (Vector3d(x, y, z));
         }
     }
+    
     //finished and tell solver the data is ok
     update_finished = true;
-}
-bool FeatureTracker::updateID(unsigned int i)
-{
-    if (i < ids.size())
-    {
-        if (ids[i] == -1)
-            ids[i] = n_id++;
-        return true;
-    }
-    else
-        return false;
 }

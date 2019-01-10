@@ -19,56 +19,11 @@ FeatureManager::FeatureManager(Matrix3d _Rs[])
     ric = Utility::ypr2R(Vector3d(RIC_y,RIC_p,RIC_r));
 }
 
-double FeatureManager::compensatedParallax1(FeaturePerId &f_per_id)
-{
-    int l = f_per_id.feature_per_frame.size();
-    FeaturePerFrame &frame_i = f_per_id.feature_per_frame[0];
-    FeaturePerFrame &frame_j = f_per_id.feature_per_frame[l - 1];
-    
-    int r_i = f_per_id.start_frame + 0;
-    int r_j = f_per_id.start_frame + l - 1;
-    
-    Vector3d p_i = frame_i.point;
-    
-    double u_i = p_i(0);
-    double v_i = p_i(1);
-    
-    double ans = 0;
-    
-    Vector3d p_j = frame_j.point;
-    Vector3d p_j_comp;
-    p_j_comp = ric.transpose() * Rs[r_i].transpose() * Rs[r_j] * ric * p_j;
-    
-    double dep_j = p_j(2);
-    double u_j = p_j(0) / dep_j;
-    double v_j = p_j(1) / dep_j;
-    
-    double du = u_i - u_j, dv = v_i - v_j;
-    double dep_j_comp = p_j_comp(2);
-    double u_j_comp = p_j_comp(0) / dep_j_comp;
-    double v_j_comp = p_j_comp(1) / dep_j_comp;
-    double du_comp = u_i - u_j_comp, dv_comp = v_i - v_j_comp;
-    
-    double para = sqrt(min(du * du + dv * dv, du_comp * du_comp + dv_comp * dv_comp));
-    
-    frame_j.parallax = para;
-    
-    if (r_i == r_j) //the feature appeared first time
-    {
-        para = 1e-3;
-    }
-    ans = max(ans, para);
-    
-    return ans;
-}
 
 double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int frame_count)
 {
     const FeaturePerFrame &frame_i = it_per_id.feature_per_frame[frame_count - 2 - it_per_id.start_frame];
     const FeaturePerFrame &frame_j = it_per_id.feature_per_frame[frame_count - 1 - it_per_id.start_frame];
-    
-    int r_i = frame_count - 2;
-    int r_j = frame_count - 1;
     
     double ans = 0;
     Vector3d p_j = frame_j.point;
