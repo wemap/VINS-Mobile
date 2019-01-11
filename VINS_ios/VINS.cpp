@@ -60,7 +60,7 @@ void VINS::clearState()
     ric = Utility::ypr2R(Vector3d(RIC_y,RIC_p,RIC_r));
     
     frame_count = 0;
-    first_imu = false;
+    first_imu = true;
     solver_flag = INITIAL;
     initial_timestamp = 0;
     all_image_frame.clear();
@@ -244,39 +244,6 @@ bool VINS::failureDetection()
     return is_failure;
 }
 
-/*
- void VINS::failureRecover()
- {
- int his_index = 0;
- for(int i = 0; i < WINDOW_SIZE; i++)
- {
- if(Headers_his[i] == Headers[0])
- {
- his_index = i;
- break;
- }
- if(i == WINDOW_SIZE -1)
- his_index = i;
- }
- Vector3d his_R0 = Utility::R2ypr(Rs_his[his_index]);
- 
- Vector3d his_P0 = Ps_his[his_index];
- 
- Vector3d cur_R0 = Utility::R2ypr(Rs[0]);
- Vector3d cur_P0 = Ps[0];
- 
- double y_diff = his_R0.x() - cur_R0.x();
- 
- Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
- 
- for (int i = 0; i <= WINDOW_SIZE; i++)
- {
- Rs[i] = rot_diff * Rs[i];
- Ps[i] = rot_diff * (Ps[i] - cur_P0) + his_P0;
- Vs[i] = rot_diff * Vs[i];
- }
- }
- */
 
 void VINS::reInit()
 {
@@ -312,22 +279,46 @@ void VINS::update_loop_correction()
 
 void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &angular_velocity)
 {
-    printf("TIME: VINS::processIMU: %.3ld\n", std::time(nullptr));
-    if (!first_imu)
+
+    // ********
+    // Thibaud: frame_count increment until 10 with processImage
+    //          frame_count is reset when f_manager.addFeatureCheckParallax track_num
+    // ********
+    
+    
+    if (first_imu)
     {
-        first_imu = true;
         prev_acc = acceleration; // Acceleration
         prev_gyr = angular_velocity; // Gyro
-    }
+        first_imu = false;
+   }
     
+    // ********
+    // Thibaud: pre_integrations[frame_count] is null when first iteration after changing frame count happens.
+    //              Just the first iteration because processImage is called less often
+    //              When frame_count == 10 (after first time), there is no more object instanciation
+    // ********
     if (!pre_integrations[frame_count])
     {
+        // ********
+        // Thibaud: This method is called only when it's not initialized
+        //          prev_acc and prev_gyr are never empty
+        //          Bas[frame_count] is always [0, 0, 0]
+        // ********
+//        printf("TIME: VINS::processImage prev_acc: %.3f, %.3f, %.3f\n", prev_acc.x(), prev_acc.y(), prev_acc.z());
         pre_integrations[frame_count] = new IntegrationBase{prev_acc, prev_gyr, Bas[frame_count], Bgs[frame_count]};
     }
     
     if (frame_count != 0)
     {
-        //covariance propagate
+        // ********
+        // Thibaud: Push IMU data in integration_base (corresponding to 1 frame)
+        //          Propagation in integration base changed. This means that:
+        //              - delta_p, delta_q, delta_v, linearized_ba, linearized_bg are modified
+        //              - covariance matrix is modified too
+        //          It's not interesing to access all of the propagation value because "evaluate" method was designed for this.
+        // ********
+        // covariance propagation
         pre_integrations[frame_count]->push_back(dt, acceleration, angular_velocity);
         
         if(solver_flag != NON_LINEAR) //comments because of recovering
@@ -342,6 +333,7 @@ void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &a
             Vector3d g{0,0,GRAVITY};
             int j = frame_count;
 
+//            printf("TIME: VINS::processImage Bas[j]: %.3f, %.3f, %.3f\n", Bas[j].x(), Bas[j].y(), Bas[j].z());
             Vector3d un_prev_acc = Rs[j] * (prev_acc - Bas[j]) - g; // Linear acceleration (3)
             Vector3d un_cur_acc = Rs[j] * (acceleration - Bas[j]) - g;
             Vector3d un_acc = 0.5 * (un_prev_acc + un_cur_acc); // (Mean of last linear acc and new one ?)
@@ -361,6 +353,9 @@ void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &a
 
 void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_num)
 {
+    printf("TIME: VINS::processImage frame_count: %d\n", frame_count);
+
+
     printf("TIME: VINS::processImage: %.3ld\n", std::time(nullptr));
     int track_num;
     printf("adding feature points %lu\n", image_msg.size());
@@ -372,7 +367,7 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
     //    printf("marginalization_flag %d\n", int(marginalization_flag));
     //    printf("this frame is-------------------------------%s\n", marginalization_flag ? "reject" : "accept");
     //    printf("Solving %d\n", frame_count);
-    printf("number of feature: %d %d\n", feature_num = f_manager.getFeatureCount(), track_num);
+//    printf("number of feature: %d %d\n", feature_num = f_manager.getFeatureCount(), track_num);
     
     Headers[frame_count] = header;
     
@@ -383,7 +378,7 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
         all_image_frame.insert(make_pair(header, imageframe));
         tmp_pre_integration = new IntegrationBase{prev_acc, prev_gyr, Vector3d(0,0,0), Vector3d(0,0,0)};
         
-        printf("TIME: VINS::processImage frame_count: %d, track_num: %d\n", frame_count, track_num);
+//        printf("TIME: VINS::processImage frame_count: %d, track_num: %d\n", frame_count, track_num);
         if (frame_count == WINDOW_SIZE)
         {
             if(track_num < 20)

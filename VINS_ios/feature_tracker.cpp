@@ -108,6 +108,18 @@ void FeatureTracker::readImage(const cv::Mat &_img, int _frame_cnt, vector<Point
     //          track_len is empty here, it will become a vector of the size of good_pts (often 70), each value is between 0 and 1,
     //              1 is a good parallax.
     //
+    //      CALLING IMPORTANT SUB METHODS:
+    //          - vins_pnp.setInit() (only after initialization)
+    //          - vins_pnp.processIMU()
+    //          - vins_pnp.processImage()
+    //          - goodFeaturesToTrack
+    //          - calcOpticalFlowPyrLK
+    //          - findFundamentalMat
+    //
+    //      OUTPUT (or modified):
+    //          - good_pts, track_len (cf above)
+    //          - P and R only after initialization, but not directly after.
+    //
     // ********
     
 //    printf("TIME: FeatureTracker::readImage: %.3ld\n", std::time(nullptr));

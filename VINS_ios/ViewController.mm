@@ -297,7 +297,6 @@ Matrix3d pnp_R;
         // ********
         if(lateast_imu_time <= 0)
         {
-            printf("TIME: VC: processImage: lateast_imu_time <= 0\n");
             cv::cvtColor(image, image, CV_BGRA2RGB);
             cv::flip(image,image,-1);
             return;
@@ -363,24 +362,39 @@ Matrix3d pnp_R;
         featuretracker.readImage(img_equa, frame_cnt, good_pts, track_len, img_msg->header, pnp_P, pnp_R, vins_normal);
         TE(time_feature);
         //cvtColor(img_equa, img_equa, CV_GRAY2BGR);
+
         
-        
-        for (int i = 0; i < good_pts.size(); i++)
-        {
+        // ********
+        // Thibaud: For drawing
+        // ********
+        for (int i = 0; i < good_pts.size(); i++) {
             cv::circle(image, good_pts[i], 0, cv::Scalar(255 * (1 - track_len[i]), 0, 255 * track_len[i]), 7); //BGR
         }
         
-        //image msg buf
+        // ********
+        // Thibaud: 1 frame out of 3
+        // ********
         if(featuretracker.img_cnt==0)
         {
+            
+            // ********
+            // Thibaud: A message is composed of:
+            //              header:         frame timestamp
+            //              point_clouds:   which is the result of feature tracker after detection (often a 70-element vector)
+            // ********
             img_msg->point_clouds = featuretracker.image_msg;
-            printf("TIME: VC: processImage: featuretracker.image_msg: %ld\n", featuretracker.image_msg.size());
-            //img_msg callback
             m_buf.lock();
             img_msg_buf.push(img_msg);
-            //NSLog(@"Img timestamp %lf",img_msg_buf.front()->header);
             m_buf.unlock();
+
+            // ********
+            // Thibaud: Notify "process" thread of a new message
+            // ********
             con.notify_one();
+            
+            // ********
+            // Thibaud: Always true in our case
+            // ********
             if(imageCacheEnabled)
             {
                 image_data_cache.header = img_msg->header;
@@ -393,14 +407,31 @@ Matrix3d pnp_R;
         // Thibaud: img_cnt is an iterative counter with a modulus 3
         // ********
         featuretracker.img_cnt = (featuretracker.img_cnt + 1) % FREQ;
-        for (int i = 0; i < good_pts.size(); i++)
-        {
+        
+        
+        // ********
+        // Thibaud: Add circle at fwd_pts position in image
+        // ********
+        for (int i = 0; i < good_pts.size(); i++) {
             cv::circle(image, good_pts[i], 0, cv::Scalar(255 * (1 - track_len[i]), 0, 255 * track_len[i]), 7); //BGR
         }
         TS(visualize);
+        
+        // ********
+        // Thibaud: Always true in our case
+        // ********
         if(imageCacheEnabled)
         {
             //use aligned vins and image
+            printf("TIME: VC: processImage: imageCacheEnabled: %ld , %ld\n", vins_pool.size(), image_pool.size());
+            
+            // ********
+            // Thibaud: vins_pool are results of getMeasurements(). One row is composed of timestamp, P and R.
+            //          image_pool are images. One row is composed of timestamp, image (iOS image)
+            //
+            //          vins_pool is empty before initialization (vector is not fill directly after initialization)
+            //
+            // ********
             if(!vins_pool.empty() && !image_pool.empty())
             {
                 while(vins_pool.size() > 1)
@@ -430,6 +461,16 @@ Matrix3d pnp_R;
             lateast_P = pnp_P.cast<float>();
             lateast_R = pnp_R.cast<float>();
         }
+        
+        
+        printf("TIME: VC: Pose: [%.3lf, %.3lf, %.3lf], [[%.3f, %.3f, %.3f], [%.3f, %.3f, %.3f], [%.3f, %.3f, %.3f]]\n",
+               lateast_P.x(), lateast_P.y(), lateast_P.z(),
+               lateast_R(0,0), lateast_R(0,1), lateast_R(0,2), lateast_R(1,0), lateast_R(1,1), lateast_R(1,2), lateast_R(2,0), lateast_R(2,1), lateast_R(2,2));
+
+        
+        // ********
+        // Thibaud: After that it seems to be just for drawing
+        // ********
         if(ui_main || start_show == false || vins.solver_flag != VINS::NON_LINEAR)  //show image and AR
         {
             cv::Mat tmp2;
@@ -609,26 +650,61 @@ bool start_global_optimization = false;
 
     std::vector<std::pair<std::vector<ImuConstPtr>, ImgConstPtr>> measurements;
     std::unique_lock<std::mutex> lk(m_buf);
-    con.wait(lk, [&]
-             {
-                 return (measurements = getMeasurements()).size() != 0;
+    con.wait(lk, [&] {
+                 // ********
+                 // Thibaud: measurements size is sometimes 0, sometimes 1
+                 //          The method is called each time app receive a new image or an IMU data
+                 //          This method is blocked until measurements size > 0
+                 //
+                 //          when not empty, measurement is composed of an img_msg returned by feature_tracker
+                 //             and between 9-16 IMU measurements
+                 // ********
+                 measurements = getMeasurements();
+        
+                 return measurements.size() != 0;
              });
     lk.unlock();
     waiting_lists = measurements.size();
+    
+    // ********
+    // Thibaud: Only one measurement for the moment
+    //          Two measurements means that its 2 images without IMU data
+    // ********
     for(auto &measurement : measurements)
     {
+        
+        
+        // ********
+        // Thibaud: Send IMU to vins (usually 10 rows)
+        // ********
         for(auto &imu_msg : measurement.first)
         {
-            send_imu(imu_msg);
+            NSTimeInterval t = imu_msg->header;
+            if (current_time < 0)
+                current_time = t;
+            double dt = (t - current_time);
+            
+            vins.processIMU(dt, imu_msg->acc, imu_msg->gyr);
+
+            current_time = t;
         }
         
+        // ********
+        // Thibaud: Send Image to vins (only 1 image)
+        // ********
         auto img_msg = measurement.second;
         map<int, Vector3d> image = img_msg->point_clouds;
-        //NSLog(@"Image timestamp = %lf",img_msg->header);
         double header = img_msg->header;
         TS(process_image);
-        vins.processImage(image,header,waiting_lists);
+        vins.processImage(image, header, waiting_lists);
         TE(process_image);
+        
+        
+        // ********
+        // Thibaud: Ceres solver is called during vins.processImage()
+        // ********
+
+        
         double time_now = [[NSProcessInfo processInfo] systemUptime];
         double time_vins = vins.Headers[WINDOW_SIZE];
         NSLog(@"vins delay %lf", time_now - time_vins);
@@ -643,7 +719,7 @@ bool start_global_optimization = false;
             solved_vins.P = vins.correct_Ps[WINDOW_SIZE-1].cast<double>();
             solved_vins.R = vins.correct_Rs[WINDOW_SIZE-1].cast<double>();
             solved_vins.V = vins.Vs[WINDOW_SIZE - 1];
-            Vector3d R_ypr = Utility::R2ypr(solved_vins.R);
+
             solved_features.clear();
             for (auto &it_per_id : vins.f_manager.feature)
             {
