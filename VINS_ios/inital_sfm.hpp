@@ -8,6 +8,8 @@
 #include <map>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
+#include "utility.hpp"
+
 using namespace Eigen;
 using namespace std;
 

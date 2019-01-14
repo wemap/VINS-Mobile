@@ -2,25 +2,28 @@
 
 GlobalSFM::GlobalSFM(){}
 
+// ********
+// Thibaud: Called internaly only
+// ********
 void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
                                  Vector2d &point0, Vector2d &point1, Vector3d &point_3d)
 {
-    printf("Pose0[0]: [%f, %f, %f, %f]\n", Pose0.row(0).x(), Pose0.row(0).y(), Pose0.row(0).z(), Pose0.row(0).w());
-    
-    printf("Pose0[1]: [%f, %f, %f, %f]\n", Pose0.row(1).x(), Pose0.row(1).y(), Pose0.row(1).z(), Pose0.row(1).w());
-    
-    printf("Pose0[2]: [%f, %f, %f, %f]\n", Pose0.row(2).x(), Pose0.row(2).y(), Pose0.row(2).z(), Pose0.row(2).w());
-
-    
-    printf("Pose1[0]: [%f, %f, %f, %f]\n", Pose1.row(0).x(), Pose1.row(0).y(), Pose1.row(0).z(), Pose1.row(0).w());
-    
-    printf("Pose1[1]: [%f, %f, %f, %f]\n", Pose1.row(1).x(), Pose1.row(1).y(), Pose1.row(1).z(), Pose1.row(1).w());
-    
-    printf("Pose1[2]: [%f, %f, %f, %f]\n", Pose1.row(2).x(), Pose1.row(2).y(), Pose1.row(2).z(), Pose1.row(2).w());
-
-
-    printf("point0: [%f, %f]\n", point0.x(), point0.y());
-    printf("point1: [%f, %f]\n", point1.x(), point1.y());
+//    printf("Pose0[0]: [%f, %f, %f, %f]\n", Pose0.row(0).x(), Pose0.row(0).y(), Pose0.row(0).z(), Pose0.row(0).w());
+//
+//    printf("Pose0[1]: [%f, %f, %f, %f]\n", Pose0.row(1).x(), Pose0.row(1).y(), Pose0.row(1).z(), Pose0.row(1).w());
+//
+//    printf("Pose0[2]: [%f, %f, %f, %f]\n", Pose0.row(2).x(), Pose0.row(2).y(), Pose0.row(2).z(), Pose0.row(2).w());
+//
+//
+//    printf("Pose1[0]: [%f, %f, %f, %f]\n", Pose1.row(0).x(), Pose1.row(0).y(), Pose1.row(0).z(), Pose1.row(0).w());
+//
+//    printf("Pose1[1]: [%f, %f, %f, %f]\n", Pose1.row(1).x(), Pose1.row(1).y(), Pose1.row(1).z(), Pose1.row(1).w());
+//
+//    printf("Pose1[2]: [%f, %f, %f, %f]\n", Pose1.row(2).x(), Pose1.row(2).y(), Pose1.row(2).z(), Pose1.row(2).w());
+//
+//
+//    printf("point0: [%f, %f]\n", point0.x(), point0.y());
+//    printf("point1: [%f, %f]\n", point1.x(), point1.y());
 
     Matrix4d design_matrix = Matrix4d::Zero();
     design_matrix.row(0) = point0[0] * Pose0.row(2) - Pose0.row(0);
@@ -28,13 +31,13 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
     design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
     design_matrix.row(3) = point1[1] * Pose1.row(2) - Pose1.row(1);
     
-    printf("design_matrix[0]: [%f, %f, %f, %f]\n", design_matrix.row(0).x(), design_matrix.row(0).y(), design_matrix.row(0).z(), design_matrix.row(0).w());
-    
-    printf("design_matrix[1]: [%f, %f, %f, %f]\n", design_matrix.row(1).x(), design_matrix.row(1).y(), design_matrix.row(1).z(), design_matrix.row(1).w());
-    
-    printf("design_matrix[2]: [%f, %f, %f, %f]\n", design_matrix.row(2).x(), design_matrix.row(2).y(), design_matrix.row(2).z(), design_matrix.row(2).w());
-    
-    printf("design_matrix[3]: [%f, %f, %f, %f]\n", design_matrix.row(3).x(), design_matrix.row(3).y(), design_matrix.row(3).z(), design_matrix.row(3).w());
+//    printf("design_matrix[0]: [%f, %f, %f, %f]\n", design_matrix.row(0).x(), design_matrix.row(0).y(), design_matrix.row(0).z(), design_matrix.row(0).w());
+//
+//    printf("design_matrix[1]: [%f, %f, %f, %f]\n", design_matrix.row(1).x(), design_matrix.row(1).y(), design_matrix.row(1).z(), design_matrix.row(1).w());
+//
+//    printf("design_matrix[2]: [%f, %f, %f, %f]\n", design_matrix.row(2).x(), design_matrix.row(2).y(), design_matrix.row(2).z(), design_matrix.row(2).w());
+//
+//    printf("design_matrix[3]: [%f, %f, %f, %f]\n", design_matrix.row(3).x(), design_matrix.row(3).y(), design_matrix.row(3).z(), design_matrix.row(3).w());
     
     Vector4d triangulated_point;
     triangulated_point =
@@ -43,10 +46,13 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
     point_3d(1) = triangulated_point(1) / triangulated_point(3);
     point_3d(2) = triangulated_point(2) / triangulated_point(3);
 
-    printf("point3d: [%f, %f, %f]\n", point_3d.x(), point_3d.y(), point_3d.z());
+//    printf("point3d: [%f, %f, %f]\n", point_3d.x(), point_3d.y(), point_3d.z());
 }
 
 
+// ********
+// Thibaud: Called internaly only
+// ********
 bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
                                 vector<SFMFeature> &sfm_f)
 {
@@ -99,6 +105,9 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
     
 }
 
+// ********
+// Thibaud: Called internaly only
+// ********
 void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Pose0,
                                      int frame1, Eigen::Matrix<double, 3, 4> &Pose1,
                                      vector<SFMFeature> &sfm_f)
@@ -155,11 +164,17 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
     q[l].y() = 0;
     q[l].z() = 0;
     T[l].setZero();
-    q[frame_num - 1] = q[l] * Quaterniond(relative_R);
+    
+    q[frame_num - 1] = Quaterniond(relative_R);
     T[frame_num - 1] = relative_T;
     //cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
     //cout << "init t_l " << T[l].transpose() << endl;
     
+    
+    
+    // ********
+    // Thibaud: Initialized a 3*4 pose matrix from relative_R and relative_T (relative_R is inversed and relative_T is from -(R*T))
+    // ********
     //rotate to cam frame
     Matrix3d *c_Rotation = new Matrix3d[frame_num];
     Vector3d *c_Translation = new Vector3d[frame_num];
@@ -179,8 +194,24 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
     c_Translation[frame_num - 1] = -1 * (c_Rotation[frame_num - 1] * T[frame_num - 1]);
     Pose[frame_num - 1].block<3, 3>(0, 0) = c_Rotation[frame_num - 1];
     Pose[frame_num - 1].block<3, 1>(0, 3) = c_Translation[frame_num - 1];
+
+//    Utility::printMatrix3d("Time: GlobalSFM - relative_R", relative_R);
+//    Utility::printVector3d("Time: GlobalSFM - relative_T", relative_T);
+//    Utility::printEigen34Matrix("Time: GlobalSFM - pose", Pose[frame_num - 1]);
+
     
     
+    // ********
+    // Thibaud: Triangulate sfm_f points using steps from 1 to 5
+    //          triangulateTwoFrames add the position of 3d points in sfm_f.
+    // ********
+    
+//    int s = feature_num;
+//    for (int j = 0; j < feature_num; j++) {
+//        if(sfm_f[j].state) {s--;}
+//    }
+//    printf("Triangulate (step 1): %d\n", s);
+
     //1: trangulate between l ----- frame_num - 1
     //2: solve pnp l + 1; trangulate l + 1 ------- frame_num - 1;
     //   ...   solve pnp l + 1; trigangulate 0 -----1;
@@ -203,9 +234,23 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
         // triangulate point based on the solve pnp result
         triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);
     }
+    
+//    s = feature_num;
+//    for (int j = 0; j < feature_num; j++) {
+//        if(sfm_f[j].state) {s--;}
+//    }
+//    printf("Triangulate (step 2): %d\n", s);
+    
     //3: triangulate l-----l+1 l+2 ... frame_num -2
     for (int i = l + 1; i < frame_num - 1; i++)
         triangulateTwoFrames(l, Pose[l], i, Pose[i], sfm_f);
+    
+//    s = feature_num;
+//    for (int j = 0; j < feature_num; j++) {
+//        if(sfm_f[j].state) {s--;}
+//    }
+//    printf("Triangulate (step 3): %d\n", s);
+    
     //4: solve pnp l-1; triangulate l-1 ----- l
     //             l-2              l-2 ----- l
     for (int i = l - 1; i >= 0; i--)
@@ -223,6 +268,13 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
         //triangulate
         triangulateTwoFrames(i, Pose[i], l, Pose[l], sfm_f);
     }
+    
+//    s = feature_num;
+//    for (int j = 0; j < feature_num; j++) {
+//        if(sfm_f[j].state) {s--;}
+//    }
+//    printf("Triangulate (step 4): %d\n", s);
+    
     //5: triangulate all other points
     for (int j = 0; j < feature_num; j++)
     {
@@ -245,6 +297,12 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
         }
     }
     
+//    s = feature_num;
+//    for (int j = 0; j < feature_num; j++) {
+//        if(sfm_f[j].state) {s--;}
+//    }
+//    printf("Triangulate (step 5): %d\n", s);
+    
     /*
      for (int i = 0; i < frame_num; i++)
      {
@@ -259,6 +317,8 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
      }
      */
     //full BA
+    
+    
     ceres::Problem problem;
     ceres::LocalParameterization* local_parameterization = new ceres::QuaternionParameterization();
     //cout << " begin full BA " << endl;
@@ -310,8 +370,18 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
     //options.minimizer_progress_to_stdout = true;
     options.max_solver_time_in_seconds = 0.3;
     ceres::Solver::Summary summary;
+    
+    
+    
+    // ********
+    // Thibaud: ceres seems to only give if it's converge (or not) and a final_cost, nothing else.
+    // ********
     ceres::Solve(options, &problem, &summary);
+    
+    
+    
     std::cout << summary.BriefReport() << "\n";
+    printf("ceres result: %.5f <====\n", summary.final_cost);
     if (summary.termination_type == ceres::CONVERGENCE || summary.final_cost < 3e-03)
         cout << "vision only BA converge" << endl;
     else

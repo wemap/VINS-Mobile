@@ -90,7 +90,7 @@ public:
     /*
      variables
      */
-    list<FeaturePerId> feature;
+    list<FeaturePerId> features;
     std::vector<std::pair<int, std::vector<int>>> outlier_info;
     int last_track_num;
     

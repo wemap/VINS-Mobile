@@ -18,6 +18,23 @@
 class Utility
 {
 public:
+    
+    static void printEigen34Matrix(const char* message, Eigen::Matrix<double, 3, 4> &mat) {
+        printf("%s: [%f, %f, %f, %f]\n", message, mat.row(0).x(), mat.row(0).y(), mat.row(0).z(), mat.row(0).w());
+        printf("%s: [%f, %f, %f, %f]\n", message, mat.row(1).x(), mat.row(1).y(), mat.row(1).z(), mat.row(1).w());
+        printf("%s: [%f, %f, %f, %f]\n", message, mat.row(2).x(), mat.row(2).y(), mat.row(2).z(), mat.row(2).w());
+    }
+    
+    static void printMatrix3d(const char* message, Eigen::Matrix3d mat) {
+        printf("%s: [%f, %f, %f]\n", message, mat.row(0).x(), mat.row(0).y(), mat.row(0).z());
+        printf("%s: [%f, %f, %f]\n", message, mat.row(1).x(), mat.row(1).y(), mat.row(1).z());
+        printf("%s: [%f, %f, %f]\n", message, mat.row(2).x(), mat.row(2).y(), mat.row(2).z());
+    }
+    
+    static void printVector3d(const char* message, Eigen::Vector3d vec) {
+        printf("%s: [%f, %f, %f]\n", message, vec.x(), vec.y(), vec.z());
+    }
+    
     template <typename Derived>
     static Eigen::Quaternion<typename Derived::Scalar> deltaQ(const Eigen::MatrixBase<Derived> &theta)
     {

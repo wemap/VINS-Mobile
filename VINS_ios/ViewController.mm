@@ -321,7 +321,7 @@ Matrix3d pnp_R;
         // Thibaud: prevTime is a kind of timestamp in micro-seconds or nano-seconds
         // ********
         prevTime = mach_absolute_time();
-        printf("TIME: VC: processImage: prevTime: %" PRId64 "\n", prevTime);
+//        printf("TIME: VC: processImage: prevTime: %" PRId64 "\n", prevTime);
 
         cv::Mat gray;
         cv::cvtColor(input_frame, gray, CV_RGBA2GRAY);
@@ -423,7 +423,7 @@ Matrix3d pnp_R;
         if(imageCacheEnabled)
         {
             //use aligned vins and image
-            printf("TIME: VC: processImage: imageCacheEnabled: %ld , %ld\n", vins_pool.size(), image_pool.size());
+//            printf("TIME: VC: processImage: imageCacheEnabled: %ld , %ld\n", vins_pool.size(), image_pool.size());
             
             // ********
             // Thibaud: vins_pool are results of getMeasurements(). One row is composed of timestamp, P and R.
@@ -721,7 +721,7 @@ bool start_global_optimization = false;
             solved_vins.V = vins.Vs[WINDOW_SIZE - 1];
 
             solved_features.clear();
-            for (auto &it_per_id : vins.f_manager.feature)
+            for (auto &it_per_id : vins.f_manager.features)
             {
                 it_per_id.used_num = it_per_id.feature_per_frame.size();
                 if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -732,7 +732,7 @@ bool start_global_optimization = false;
                 Vector3d pts_i = it_per_id.feature_per_frame[0].point * it_per_id.estimated_depth;
                 IMG_MSG_LOCAL tmp_feature;
                 tmp_feature.id = it_per_id.feature_id;
-                tmp_feature.position = vins.r_drift * vins.Rs[imu_i] * (vins.ric * pts_i + vins.tic) + vins.r_drift * vins.Ps[imu_i] + vins.t_drift;
+                tmp_feature.position = vins.Rs[imu_i] * (vins.ric * pts_i + vins.tic) + vins.Ps[imu_i];
                 tmp_feature.track_num = (int)it_per_id.feature_per_frame.size();
                 solved_features.push_back(tmp_feature);
             }

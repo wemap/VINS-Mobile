@@ -119,6 +119,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, int _frame_cnt, vector<Point
     //      OUTPUT (or modified):
     //          - good_pts, track_len (cf above)
     //          - P and R only after initialization, but not directly after.
+    //          - image_msg which are 3d positions of all fwd_pts (z = 1)
     //
     // ********
     

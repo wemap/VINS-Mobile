@@ -88,9 +88,7 @@ public:
     vector<Vector3f> correct_point_cloud;
     Vector3f correct_Ps[WINDOW_SIZE];
     Matrix3f correct_Rs[WINDOW_SIZE];
-    Vector3d t_drift;
-    Matrix3d r_drift;
-    
+
     MarginalizationInfo *last_marginalization_info;
     vector<double *> last_marginalization_parameter_blocks;
     vector<Vector3f> point_cloud;
@@ -170,6 +168,6 @@ public:
     bool failureDetection();
     void failureRecover();
     void reInit();
-    void update_loop_correction();
+    void cast_pose_to_float();
 };
 #endif /* VINS_hpp */

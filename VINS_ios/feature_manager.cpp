@@ -16,12 +16,17 @@ int FeaturePerId::endFrame()
 FeatureManager::FeatureManager(Matrix3d _Rs[])
 : Rs(_Rs)
 {
+    printf("TIME: FeatureManager::FeatureManager\n");
     ric = Utility::ypr2R(Vector3d(RIC_y,RIC_p,RIC_r));
 }
 
 
+// ********
+// Thibaud: Called internaly from addFeatureCheckParallax
+// ********
 double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int frame_count)
 {
+
     const FeaturePerFrame &frame_i = it_per_id.feature_per_frame[frame_count - 2 - it_per_id.start_frame];
     const FeaturePerFrame &frame_j = it_per_id.feature_per_frame[frame_count - 1 - it_per_id.start_frame];
     
@@ -57,6 +62,10 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
  */
 bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, Vector3d> &image_msg, int &parallax_num)
 {
+    
+    printf("TIME: FeatureManager::addFeatureCheckParallax (TODO check)\n");
+
+    
     double parallax_sum = 0;
     parallax_num = 0;
     last_track_num = 0;
@@ -65,15 +74,21 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, Vec
         FeaturePerFrame f_per_fra(id_pts.second);
         
         int feature_id = id_pts.first;
-        auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
+        auto it = find_if(features.begin(), features.end(), [feature_id](const FeaturePerId &it)
                           {
                               return it.feature_id == feature_id;
                           });
+        
+        // ********
+        // Thibaud: If feature_id is not found in feature, we add a new feature (f_per_id) in feature vector (feature).
+        //
+        // ********
         //new feature
-        if (it == feature.end())
+        if (it == features.end())
         {
-            feature.push_back(FeaturePerId(feature_id, frame_count)); //give id and start frame
-            feature.back().feature_per_frame.push_back(f_per_fra);    //give point
+            FeaturePerId f_per_id(feature_id, frame_count);
+            f_per_id.feature_per_frame.push_back(f_per_fra);
+            features.push_back(f_per_id);
         }
         //find match with previous feature
         else if (it->feature_id == feature_id)
@@ -86,7 +101,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, Vec
     if (frame_count < 2 || last_track_num < 20)
         return true;
     
-    for (auto &it_per_id : feature)
+    for (auto &it_per_id : features)
     {
         if (it_per_id.start_frame <= frame_count - 2 &&
             it_per_id.start_frame + int(it_per_id.feature_per_frame.size()) - 1 >= frame_count - 1)
@@ -111,9 +126,12 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, Vec
 
 vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_count_l, int frame_count_r)
 {
+    printf("TIME: FeatureManager::getCorresponding (%d, %d)\n", frame_count_l, frame_count_r);
+
     vector<pair<Vector3d, Vector3d>> corres;
-    for (auto &it : feature)
+    for (auto &it : features)
     {
+//        printf("TIME: FeatureManager::getCorresponding loop: %d <= %d && %d >= %d (%d)\n", it.start_frame, frame_count_l, it.endFrame(), frame_count_r, it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r);
         if (it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r)
         {
             Vector3d a = Vector3d::Zero(), b = Vector3d::Zero();
@@ -132,8 +150,11 @@ vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_coun
 
 void FeatureManager::clearDepth(const VectorXd &x)
 {
+    printf("TIME: FeatureManager::clearDepth\n");
+
+
     int feature_index = -1;
-    for (auto &it_per_id : feature)
+    for (auto &it_per_id : features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -144,8 +165,10 @@ void FeatureManager::clearDepth(const VectorXd &x)
 
 void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic, Matrix3d ric, bool is_nonlinear)
 {
+    printf("TIME: FeatureManager::triangulate\n");
+
     outlier_info.clear();
-    for (auto &it_per_id : feature)
+    for (auto &it_per_id : features)
     {
         if(it_per_id.feature_per_frame.size()>= WINDOW_SIZE)
         {
@@ -213,8 +236,10 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic, Matrix3d ric, bool
 
 void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3d marg_P, Eigen::Matrix3d new_R, Eigen::Vector3d new_P)
 {
-    for (auto it = feature.begin(), it_next = feature.begin();
-         it != feature.end(); it = it_next)
+    printf("TIME: FeatureManager::removeBackShiftDepth\n");
+
+    for (auto it = features.begin(), it_next = features.begin();
+         it != features.end(); it = it_next)
     {
         it_next++;
         
@@ -225,7 +250,7 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
             Eigen::Vector3d uv_i = it->feature_per_frame[0].point;
             it->feature_per_frame.erase(it->feature_per_frame.begin());
             if (it->feature_per_frame.size() < 2)
-                feature.erase(it);
+                features.erase(it);
             else
             {
                 Eigen::Vector3d pts_i = uv_i * it->estimated_depth;
@@ -243,20 +268,22 @@ void FeatureManager::removeBackShiftDepth(Eigen::Matrix3d marg_R, Eigen::Vector3
 
 void FeatureManager::removeFailures()
 {
-    for (auto it = feature.begin(), it_next = feature.begin();
-         it != feature.end(); it = it_next)
+    printf("TIME: FeatureManager::removeFailures\n");
+    for (auto it = features.begin(), it_next = features.begin();
+         it != features.end(); it = it_next)
     {
         it_next++;
         if (it->solve_flag == 2)
-            feature.erase(it);
+            features.erase(it);
     }
 }
 
 VectorXd FeatureManager::getDepthVector()
 {
+    printf("TIME: FeatureManager::getDepthVector\n");
     VectorXd dep_vec(getFeatureCount());
     int feature_index = -1;
-    for (auto &it_per_id : feature)
+    for (auto &it_per_id : features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -268,8 +295,9 @@ VectorXd FeatureManager::getDepthVector()
 
 int FeatureManager::getFeatureCount()
 {
+//    printf("TIME: FeatureManager::getFeatureCount\n");
     int sum = 0;
-    for (auto &it : feature)
+    for (auto &it : features)
     {
         it.used_num = it.feature_per_frame.size();
         if (it.used_num >= 2  && it.start_frame < WINDOW_SIZE - 2)
@@ -285,8 +313,9 @@ int FeatureManager::getFeatureCount()
 
 void FeatureManager::setDepth(const VectorXd &x)
 {
+    printf("TIME: FeatureManager::setDepth\n");
     int feature_index = -1;
-    for (auto &it_per_id : feature)
+    for (auto &it_per_id : features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -305,13 +334,15 @@ void FeatureManager::setDepth(const VectorXd &x)
 
 void FeatureManager::clearState()
 {
-    feature.clear();
+    printf("TIME: FeatureManager::clearState\n");
+    features.clear();
 }
 
 void FeatureManager::removeBack()
 {
-    for (auto it = feature.begin(), it_next = feature.begin();
-         it != feature.end(); it = it_next)
+    printf("TIME: FeatureManager::removeBack\n");
+    for (auto it = features.begin(), it_next = features.begin();
+         it != features.end(); it = it_next)
     {
         it_next++;
         
@@ -324,7 +355,7 @@ void FeatureManager::removeBack()
             it->feature_per_frame.erase(it->feature_per_frame.begin());
             if (it->feature_per_frame.size() == 0)
             {
-                feature.erase(it);
+                features.erase(it);
                 //printf("remove back\n");
             }
         }
@@ -333,7 +364,8 @@ void FeatureManager::removeBack()
 
 void FeatureManager::removeFront(int frame_count)
 {
-    for (auto it = feature.begin(), it_next = feature.begin(); it != feature.end(); it = it_next)
+    printf("TIME: FeatureManager::removeFront\n");
+    for (auto it = features.begin(), it_next = features.begin(); it != features.end(); it = it_next)
     {
         it_next++;
         
@@ -350,7 +382,7 @@ void FeatureManager::removeFront(int frame_count)
             it->feature_per_frame.erase(it->feature_per_frame.begin() + j);
             if (it->feature_per_frame.size() == 0)
             {
-                feature.erase(it);
+                features.erase(it);
                 //printf("remove front\n");
             }
             

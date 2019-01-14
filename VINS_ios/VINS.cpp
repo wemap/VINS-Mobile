@@ -16,8 +16,6 @@ failure_hand{false},
 drawresult{0.0, 0.0, 0.0, 0.0, 0.0, 7.0}
 {
     printf("init VINS begins\n");
-    t_drift.setZero();
-    r_drift.setIdentity();
     clearState();
     failure_occur = 0;
     last_P.setZero();
@@ -251,28 +249,15 @@ void VINS::reInit()
     failureDetection();
 }
 
-void VINS::update_loop_correction()
+void VINS::cast_pose_to_float()
 {
-    //update loop correct pointcloud
-    correct_point_cloud.clear();
-    for (auto &it_per_id : f_manager.feature)
-    {
-        it_per_id.used_num = it_per_id.feature_per_frame.size();
-        if (!(it_per_id.used_num >= 4 && it_per_id.start_frame < WINDOW_SIZE - 2))
-            continue;
-        if (/*it_per_id.start_frame > WINDOW_SIZE * 3.0 / 4.0 ||*/ it_per_id.solve_flag != 1)
-            continue;
-        int imu_i = it_per_id.start_frame;
-        Vector3d pts_i = it_per_id.feature_per_frame[0].point * it_per_id.estimated_depth;
-        Vector3d tmp = r_drift * Rs[imu_i] * (ric * pts_i + tic) + r_drift * Ps[imu_i] + t_drift;
-        correct_point_cloud.push_back(tmp.cast<float>());
-    }
+
     //update correct pose
     for(int i = 0; i < WINDOW_SIZE; i++)
     {
-        Vector3d correct_p = r_drift * Ps[i] + t_drift;
+        Vector3d correct_p = Ps[i];
         correct_Ps[i] = correct_p.cast<float>();
-        Matrix3d correct_r = r_drift * Rs[i];
+        Matrix3d correct_r = Rs[i];
         correct_Rs[i] = correct_r.cast<float>();
     }
 }
@@ -281,7 +266,7 @@ void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &a
 {
 
     // ********
-    // Thibaud: frame_count increment until 10 with processImage
+    // Thibaud: frame_count increments until 10 with processImage
     //          frame_count is reset when f_manager.addFeatureCheckParallax track_num
     // ********
     
@@ -316,14 +301,22 @@ void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &a
         //          Propagation in integration base changed. This means that:
         //              - delta_p, delta_q, delta_v, linearized_ba, linearized_bg are modified
         //              - covariance matrix is modified too
-        //          It's not interesing to access all of the propagation value because "evaluate" method was designed for this.
+        //          It's not interesing to access all of the propagation values now, because "evaluate" method was designed for this.
         // ********
         // covariance propagation
         pre_integrations[frame_count]->push_back(dt, acceleration, angular_velocity);
         
+        // ********
+        // Thibaud: Following condition (just the if) is not present in VINS-Mono
+        //          tmp_pre_integration is created when an image is received, previous tmp_pre_integration is stored in
+        //              all_image_frame
+        // ********
         if(solver_flag != NON_LINEAR) //comments because of recovering
             tmp_pre_integration->push_back(dt, acceleration, angular_velocity);
-        
+
+        // ********
+        // Thibaud: Add IMU data to their windowed buffer (size = 10)
+        // ********
         dt_buf[frame_count].push_back(dt);
         acceleration_buf[frame_count].push_back(acceleration);
         angular_velocity_buf[frame_count].push_back(angular_velocity);
@@ -333,7 +326,9 @@ void VINS::processIMU(double dt, const Vector3d &acceleration, const Vector3d &a
             Vector3d g{0,0,GRAVITY};
             int j = frame_count;
 
-//            printf("TIME: VINS::processImage Bas[j]: %.3f, %.3f, %.3f\n", Bas[j].x(), Bas[j].y(), Bas[j].z());
+            // ********
+            // Thibaud: Calculate Vs, Ps and R using double integration and bias from last image process
+            // ********
             Vector3d un_prev_acc = Rs[j] * (prev_acc - Bas[j]) - g; // Linear acceleration (3)
             Vector3d un_cur_acc = Rs[j] * (acceleration - Bas[j]) - g;
             Vector3d un_acc = 0.5 * (un_prev_acc + un_cur_acc); // (Mean of last linear acc and new one ?)
@@ -356,10 +351,12 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
     printf("TIME: VINS::processImage frame_count: %d\n", frame_count);
 
 
-    printf("TIME: VINS::processImage: %.3ld\n", std::time(nullptr));
+    // ********
+    // Thibaud: marginalization is 1 when the device is translating and 0 otherwise
+    // ********
     int track_num;
-    printf("adding feature points %lu\n", image_msg.size());
-    if (f_manager.addFeatureCheckParallax(frame_count, image_msg, track_num))
+    bool marginalization = f_manager.addFeatureCheckParallax(frame_count, image_msg, track_num);
+    if (marginalization)
         marginalization_flag = MARGIN_OLD;
     else
         marginalization_flag = MARGIN_SECOND_NEW;
@@ -373,33 +370,53 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
     
     if(solver_flag == INITIAL)
     {
+        // ********
+        // Thibaud: Save current image_msg with previous tmp_pre_intregration in all_image_frame
+        //          all_image_frame is fill until initialization finished. The vector is cleared when the feature detection is lost
+        // ********
         ImageFrame imageframe(image_msg, header);
         imageframe.pre_integration = tmp_pre_integration;
         all_image_frame.insert(make_pair(header, imageframe));
+        
+        // ********
+        // Thibaud: Create a new tmp_pre_integration which will be fill by processIMU until next frame
+        // ********
         tmp_pre_integration = new IntegrationBase{prev_acc, prev_gyr, Vector3d(0,0,0), Vector3d(0,0,0)};
         
-//        printf("TIME: VINS::processImage frame_count: %d, track_num: %d\n", frame_count, track_num);
+        // ********
+        // Thibaud: We enter in this loop only if we have at least 10 images in the sliding window
+        // ********
         if (frame_count == WINDOW_SIZE)
         {
+            
+            // ********
+            // Thibaud: re-initialize if track_num is too low.
+            //          clearState: clear all vectors
+            // ********
             if(track_num < 20)
             {
                 clearState();
                 return;
             }
             bool result = false;
+            
+            // ********
+            // Thibaud: When sliding window is full, solve initial is called about 1 time out of 3 (sometimes 2)
+            //          Solve initial can return true or false
+            // ********
             if(header - initial_timestamp > 0.3)
             {
                 result = solveInitial();
                 initial_timestamp = header;
             }
+            
             if(result)
             {
                 solve_ceres(buf_num);
+                
                 if(final_cost > 200)  //initialization failed, need reinitialize
                 {
-                    printf("#################### TIME: VINS: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
-                    printf("#################### TIME: VC: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
-                    printf("#################### TIME: FeatureTracker: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
+                    printf("#################### TIME: INITIALIZATION FAILED - final cost %lf failed! ####################\n",final_cost);
                     delete last_marginalization_info;
                     last_marginalization_info = nullptr;
                     solver_flag = INITIAL;
@@ -415,14 +432,11 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
                     initProgress = 100;
                     init_status = SUCC;
                     fail_times = 0;
-                    printf("Initialization finish---------------------------------------------------!\n");
-                    printf("#################### TIME: VINS: INITIALIZATION FINISHED! ####################\n");
-                    printf("#################### TIME: VC: INITIALIZATION FINISHED! ####################\n");
-                    printf("#################### TIME: FeatureTracker: INITIALIZATION FINISHED! ####################\n");
+                    printf("#################### TIME: INITIALIZATION FINISHED! ####################\n");
                     solver_flag = NON_LINEAR;
                     slideWindow();
                     f_manager.removeFailures();
-                    update_loop_correction();
+                    cast_pose_to_float();
                     last_R = Rs[WINDOW_SIZE];
                     last_P = Ps[WINDOW_SIZE];
                     last_R_old = Rs[0];
@@ -431,6 +445,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
             }
             else
             {
+                // ********
+                // Thibaud: Slide window if Initialization failed
+                // ********
                 slideWindow();
             }
         }
@@ -443,7 +460,9 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
     else
     {
 
-        printf("TIME: VINS::processImage Gogogo\n");
+        // ********
+        // Thibaud: Here is when intialization finished
+        // ********
 
         bool is_nonlinear = true;
         f_manager.triangulate(Ps, tic, ric, is_nonlinear);
@@ -458,7 +477,7 @@ void VINS::processImage(map<int, Vector3d> &image_msg, double header, int buf_nu
         }
         slideWindow();
         f_manager.removeFailures();
-        update_loop_correction();
+        cast_pose_to_float();
         
         last_R = Rs[WINDOW_SIZE];
         last_P = Ps[WINDOW_SIZE];
@@ -515,7 +534,7 @@ void VINS::solve_ceres(int buf_num)
     double f_sum = 0.0;
     double r_f_sum = 0.0;
     int feature_index = -1;
-    for (auto &it_per_id : f_manager.feature)
+    for (auto &it_per_id : f_manager.features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -584,7 +603,7 @@ void VINS::solve_ceres(int buf_num)
     printf("solve\n");
     printf("options: %lf\n", options.eta);
     printf("problem: %d\n", problem.NumParameters());
-    printf("options: %lf\n", summary.final_cost);
+    printf("summary: %lf\n", summary.final_cost);
     ceres::Solve(options, &problem, &summary);
     final_cost = summary.final_cost;
     //cout << summary.FullReport() << endl;
@@ -632,7 +651,7 @@ void VINS::solve_ceres(int buf_num)
         
         {
             int feature_index = -1;
-            for (auto &it_per_id : f_manager.feature)
+            for (auto &it_per_id : f_manager.features)
             {
                 it_per_id.used_num = it_per_id.feature_per_frame.size();
                 if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -745,60 +764,62 @@ void VINS::solve_ceres(int buf_num)
 
 bool VINS::solveInitial()
 {
-    printf("TIME: VINS::solveInitial: %.3ld\n", std::time(nullptr));
-    printf("solve initial------------------------------------------\n");
-    printf("PS %lf %lf %lf\n", Ps[0].x(),Ps[0].y(), Ps[0].z());
-    //check imu observibility
-    /*
-     {
-     map<double, ImageFrame>::iterator frame_it;
-     Vector3d sum_g;
-     for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
-     {
-     double dt = frame_it->second.pre_integration->sum_dt;
-     if(dt == 0)
-     {
-     printf("init IMU variation not enouth!\n");
-     init_status = FAIL_IMU;
-     fail_times++;
-     return false;
-     }
-     Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-     sum_g += tmp_g;
-     }
-     
-     Vector3d aver_g;
-     aver_g = sum_g * 1.0 / ((int)all_image_frame.size() - 1);
-     cout << "aver_g " << aver_g.transpose() << endl;
-     double var = 0;
-     for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
-     {
-     double dt = frame_it->second.pre_integration->sum_dt;
-     Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-     var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);
-     //cout << "frame g " << tmp_g.transpose() << endl;
-     }
-     var = sqrt(var / ((int)all_image_frame.size() - 1));
-     printf("IMU variation %f!\n", var);
-     if(var < 0.25)
-     {
-     printf("init IMU variation not enouth!\n");
-     init_status = FAIL_IMU;
-     fail_times++;
-     return false;
-     }
-     }
-     */
+//    printf("TIME: VINS::solveInitial: %.3ld\n", std::time(nullptr));
+//    printf("solve initial------------------------------------------\n");
+//    printf("PS %lf %lf %lf\n", Ps[0].x(),Ps[0].y(), Ps[0].z());
+    
+    // ********
+    // Thibaud: When sliding window is full, solve initial is called about 1 time out of 3 (sometimes 2)
+    //          Solve initial can return true or false
+    // ********
+    
     // global sfm
     Quaterniond *Q = new Quaterniond[frame_count + 1];
     Vector3d *T = new Vector3d[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;
     vector<SFMFeature> sfm_f;
+    
+    printf("TIME: VINS::solveInitial: %ld\n", f_manager.features.size());
+
+
     {
-        for (auto &it_per_id : f_manager.feature)
+        Matrix3d relative_R;
+        Vector3d relative_T;
+        int l;
+        
+        // ********
+        // Thibaud: relative_R and relative_T have been set from corresponding features between frames using features from feature_manager
+        //          l seems to be the frame number which have been used in the window to calculate relative_R and relative_T
+        // ********
+        if (!relativePose(0, relative_R, relative_T, l))
+        {
+            printf("init solve 5pts between first frame and last frame failed\n");
+            return false;
+        }
+        printf("TIME: VINS::solveInitial: relativePose: %d\n", l);
+
+        //update init progress
+        initProgress = 30;
+        
+        
+        
+        
+        // ********
+        // Thibaud: Fill sfm_f structure with SFMFeature built from f_manager.features.
+        //          Essentially, Eigen 3D vector is changed for an Eigen 2D vector.
+        // ********
+        for (auto &it_per_id : f_manager.features)
         {
             int imu_j = it_per_id.start_frame - 1;
             
+            // ********
+            // Thibaud: SFMFeature
+            //      bool state;
+            //      int id;
+            //      vector<pair<int,Vector2d>> observation;
+            //      double position[3];
+            //      double depth;
+            // ********
             SFMFeature tmp_feature;
             tmp_feature.state = false;
             tmp_feature.id = it_per_id.feature_id;
@@ -810,17 +831,21 @@ bool VINS::solveInitial()
             }
             sfm_f.push_back(tmp_feature);
         }
-        Matrix3d relative_R;
-        Vector3d relative_T;
-        int l;
-        if (!relativePose(0, relative_R, relative_T, l))
-        {
-            printf("init solve 5pts between first frame and last frame failed\n");
-            return false;
-        }
-        //update init progress
-        initProgress = 30;
         
+ 
+
+        // ********
+        // Thibaud: sfm.construct(
+        //              int frame_num, <= often 10 + 1 (11)
+        //              Quaterniond* q, <= Q is used as an output
+        //              Vector3d* T, <= T is used for output
+        //              int l, <= first_frame used for relativePose (often 0 or 1)
+        //              const Matrix3d relative_R, <= input relative R from relativePose
+        //              const Vector3d relative_T, <= input relative T from relativePose
+        //              vector<SFMFeature> &sfm_f, <= input features built from previous step
+        //              map<int, Vector3d> &sfm_tracked_points <= output 3d points
+        //              )
+        // ********
         GlobalSFM sfm;
         if(!sfm.construct(frame_count + 1, Q, T, l,
                           relative_R, relative_T,
@@ -835,6 +860,8 @@ bool VINS::solveInitial()
         //update init progress
         initProgress = 50;
     }
+    
+    
     //solve pnp for all frame
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
@@ -989,7 +1016,7 @@ bool VINS::visualInitialAlign()
     }
     printf("init finish--------------------\n");
     
-    for (auto &it_per_id : f_manager.feature)
+    for (auto &it_per_id : f_manager.features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -1017,13 +1044,23 @@ bool VINS::visualInitialAlign()
 
 bool VINS::relativePose(int camera_id, Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
-    printf("TIME: VINS::relativePose: %.3ld\n", std::time(nullptr));
+//    printf("TIME: VINS::relativePose: %.3ld\n", std::time(nullptr));
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
+        
+        // ********
+        // Thibaud: it seems that the script try to find feature correspondances in the sliding window.
+        //          It tries the first frame with the last one, then the second frame with the last one...
+        // ********
         corres = f_manager.getCorresponding(i, WINDOW_SIZE);
+
         if (corres.size() > 20)
         {
+            
+            // ********
+            // Thibaud: Find the sum of parallax to evaluate a part of initialization
+            // ********
             double sum_parallax = 0;
             double average_parallax;
             for (int j = 0; j < int(corres.size()); j++)
@@ -1042,6 +1079,10 @@ bool VINS::relativePose(int camera_id, Matrix3d &relative_R, Vector3d &relative_
                 fail_times++;
                 return false;
             }
+            
+            // ********
+            // Thibaud: m_estimator solve relative RT by using "findEssentialMat" on two groups: first points of corres, second points of corres. Then "recoverPose" is used to find R and T
+            // ********
             if(m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;
@@ -1151,7 +1192,7 @@ void VINS::slideWindowOld()
 {
     printf("marginalize back\n");
     point_cloud.clear();
-    for (auto &it_per_id : f_manager.feature)
+    for (auto &it_per_id : f_manager.features)
     {
         it_per_id.used_num = it_per_id.feature_per_frame.size();
         if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
